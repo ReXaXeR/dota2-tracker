@@ -1,0 +1,85 @@
+{
+  "name": "dota2-tracker",
+  "version": "1.0.4",
+  "description": "Dota 2 Match Tracker — overlay with hero pick stats",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run vite\" \"npm run electron:dev\"",
+    "vite": "vite",
+    "electron:dev": "wait-on http://localhost:5173 && electron .",
+    "build": "vite build && electron-builder",
+    "build:win": "vite build && electron-builder --win",
+    "start": "node gsi-server/server.js",
+    "release": "vite build && electron-builder --win --publish always",
+    "publish": "npm version patch && git add -A && git commit -m \"chore: bump version\" --allow-empty && git push && git push --tags",
+    "publish:minor": "npm version minor && git add -A && git commit -m \"chore: bump version\" --allow-empty && git push && git push --tags",
+    "publish:major": "npm version major && git add -A && git commit -m \"chore: bump version\" --allow-empty && git push && git push --tags"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.0",
+    "electron-updater": "^6.1.7",
+    "express": "^4.18.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.0",
+    "concurrently": "^8.2.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.6.0",
+    "vite": "^5.0.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.rexaxer.dota2tracker",
+    "productName": "Dota 2 Tracker",
+    "copyright": "ReXaXeR",
+    "asar": false,
+    "directories": {
+      "output": "dist-electron",
+      "buildResources": "build-resources"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "gsi-server/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "gamestate_integration_dota2tracker.cfg",
+        "to": "."
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build-resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Dota 2 Tracker",
+      "installerHeaderIcon": "build-resources/icon.ico",
+      "uninstallDisplayName": "Dota 2 Tracker",
+      "deleteAppDataOnUninstall": false,
+      "include": "build-resources/installer.nsh"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "ReXaXeR",
+      "repo": "dota2-tracker",
+      "releaseType": "release"
+    }
+  }
+}
