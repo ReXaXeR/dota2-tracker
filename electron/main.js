@@ -235,15 +235,33 @@ body{background:#0a0c12;color:#c8d0e0;font-family:'Inter',sans-serif;font-size:1
     </div>
   </div>
 
-  <!-- STRATZ API -->
+  <!-- STEAM API -->
   <div class="section">
-    <div class="section-title">Stratz API</div>
+    <div class="section-title">Steam Web API</div>
     <div class="card">
-      <div class="card-label" style="margin-bottom:8px">API Token</div>
-      <input class="input" type="password" id="stratz-token" placeholder="eyJhbGciOiJ...">
-      <div style="display:flex;justify-content:space-between;margin-top:8px;align-items:center">
-        <a class="link" href="https://stratz.com/api" onclick="openExternal('https://stratz.com/api');return false">Получить токен →</a>
-        <button class="btn btn-ghost" onclick="saveToken()">Сохранить</button>
+      <div style="margin-bottom:10px">
+        <div class="card-label">Steam API Key</div>
+        <div class="card-sub" style="margin-top:3px">Нужен для загрузки статистики игроков во время матча (пик/игра). Бесплатно, выдаётся мгновенно.</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <input class="input" type="password" id="steam-key" placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" style="flex:1">
+        <button class="btn btn-ghost" id="show-key-btn" onclick="toggleShowKey()" title="Показать/скрыть">👁</button>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+        <div id="steam-status" style="font-size:11px;color:#7a8299">—</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost" onclick="openGetSteamKeyAuto()">1. Получить ключ</button>
+          <button class="btn btn-ghost" id="paste-btn" style="display:none;background:rgba(108,140,255,0.12);color:#6c8cff;border-color:rgba(108,140,255,0.3)" onclick="pasteFromClipboard()">2. Вставить</button>
+          <button class="btn btn-primary" onclick="saveSteamKey()">Проверить и сохранить</button>
+        </div>
+      </div>
+      <div style="margin-top:10px;padding:8px;background:rgba(108,140,255,0.06);border-radius:6px;border:1px solid rgba(108,140,255,0.15)" id="steam-banner">
+        <div style="font-size:10px;color:#6c8cff;font-weight:600;margin-bottom:4px">КАК ПОЛУЧИТЬ — 2 ШАГА:</div>
+        <div style="font-size:11px;color:#7a8299;line-height:1.8">
+          1. Нажми <b style="color:#c8d0e0">«1. Получить ключ»</b> — откроется Steam в браузере<br>
+          2. Введи домен <code style="background:#1e2535;padding:1px 5px;border-radius:3px;color:#c8d0e0">localhost</code>, нажми «Зарегистрировать» → <b style="color:#4ade80">скопируй ключ (Ctrl+C)</b><br>
+          3. Вернись сюда — ключ <b style="color:#6c8cff">вставится и сохранится автоматически</b> ✓
+        </div>
       </div>
     </div>
   </div>
@@ -361,17 +379,129 @@ function updateOpacity(v) {
   api?.setOpacity(v / 100);
 }
 
-function saveToken() {
-  const token = document.getElementById('stratz-token').value.trim();
-  if (!token) return;
-  api?.saveStratzToken(token);
-  alert('Токен сохранён — перезапусти приложение');
+function toggleShowKey() {
+  const inp = document.getElementById('steam-key');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
 }
+
+function openGetSteamKey() {
+  api?.openExternal('https://steamcommunity.com/dev/apikey');
+  // Через 3 секунды показываем кнопку "Вставить из буфера"
+  setTimeout(() => {
+    document.getElementById('paste-btn').style.display = 'inline-block';
+    document.getElementById('steam-status').textContent = 'Скопируй ключ на сайте Steam и нажми «Вставить»';
+    document.getElementById('steam-status').style.color = '#6c8cff';
+  }, 3000);
+}
+
+async function pasteFromClipboard() {
+  try {
+    const text = await navigator.clipboard.readText();
+    const key = text.trim();
+    if (key.length >= 20) {
+      document.getElementById('steam-key').value = key;
+      document.getElementById('steam-key').type = 'text';
+      document.getElementById('steam-status').textContent = '✓ Ключ вставлен — нажми «Проверить и сохранить»';
+      document.getElementById('steam-status').style.color = '#facc15';
+    } else {
+      document.getElementById('steam-status').textContent = '⚠ В буфере нет ключа — скопируй его на странице Steam';
+      document.getElementById('steam-status').style.color = '#fb923c';
+    }
+  } catch(e) {
+    // Если clipboard API недоступен — просто фокус на поле
+    document.getElementById('steam-key').focus();
+    document.getElementById('steam-status').textContent = 'Вставь ключ вручную (Ctrl+V) в поле выше';
+    document.getElementById('steam-status').style.color = '#7a8299';
+  }
+}
+
+async function validateAndSaveSteamKey() {
+  const key = document.getElementById('steam-key').value.trim();
+  const status = document.getElementById('steam-status');
+  const btn = document.getElementById('save-steam-btn');
+
+  if (!key) { status.textContent = '⚠ Введи ключ'; status.style.color = '#fb923c'; return; }
+  if (key.length < 20) { status.textContent = '⚠ Ключ слишком короткий'; status.style.color = '#f87171'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Проверка...';
+  status.textContent = 'Проверяем ключ...';
+  status.style.color = '#7a8299';
+
+  try {
+    // Проверяем ключ реальным запросом к Steam API
+    const res = await fetch(
+      'https://api.steampowered.com/ISteamWebAPIUtil/GetSupportedAPIList/v1/?key=' + key,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data?.apilist) throw new Error('Неверный ответ');
+
+    // Ключ рабочий — сохраняем
+    api?.saveSteamKey(key);
+    status.textContent = '✓ Ключ проверен и сохранён!';
+    status.style.color = '#4ade80';
+    document.getElementById('steam-key').value = key.slice(0,4) + '•'.repeat(key.length - 8) + key.slice(-4);
+    document.getElementById('steam-key').type = 'password';
+    document.getElementById('steam-banner').style.display = 'none';
+  } catch(e) {
+    status.textContent = '✗ Ключ недействителен — проверь и попробуй снова';
+    status.style.color = '#f87171';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Проверить и сохранить';
+  }
+}
+
+function saveSteamKey() { validateAndSaveSteamKey(); }
 
 function saveSettings() {
   const auto = document.getElementById('auto-check').checked;
   api?.saveSettings({ autoCheck: auto });
 }
+
+// Проверяем есть ли уже ключ
+window.addEventListener('load', () => {
+  api?.hasSteamKey().then(has => {
+    if (has) {
+      document.getElementById('steam-status').textContent = '✓ Ключ установлен';
+      document.getElementById('steam-status').style.color = '#4ade80';
+      document.getElementById('steam-key').placeholder = '••••••••••••••••••••••••••••••••';
+      document.getElementById('steam-banner').style.display = 'none';
+    } else {
+      document.getElementById('steam-status').textContent = '✗ Ключ не задан — live данные недоступны';
+      document.getElementById('steam-status').style.color = '#f87171';
+    }
+  }).catch(() => {});
+});
+
+// Автовставка при возврате фокуса — если пользователь открыл страницу Steam и скопировал ключ
+let steamPageOpened = false;
+function openGetSteamKeyAuto() {
+  steamPageOpened = true;
+  openGetSteamKey();
+}
+
+window.addEventListener('focus', async () => {
+  if (!steamPageOpened) return;
+  try {
+    const text = await navigator.clipboard.readText();
+    const key = text.trim();
+    // Ключ Steam — 32 символа, только буквы и цифры
+    if (/^[A-F0-9]{32}$/i.test(key) || (key.length >= 25 && key.length <= 40 && /^[A-Za-z0-9]+$/.test(key))) {
+      const inp = document.getElementById('steam-key');
+      const status = document.getElementById('steam-status');
+      inp.value = key;
+      inp.type = 'text';
+      status.textContent = '🔑 Ключ найден в буфере — проверяем...';
+      status.style.color = '#6c8cff';
+      steamPageOpened = false;
+      // Автопроверка и сохранение
+      await validateAndSaveSteamKey();
+    }
+  } catch {}
+});
 </script>
 </body></html>`;
 }
@@ -491,6 +621,42 @@ ipcMain.on('save-settings', (_, settings) => {
   }
 });
 
+ipcMain.on('save-steam-key', (_, key) => {
+  const fs = require('fs');
+  const envPath = path.join(app.getPath('userData'), '.env');
+  try {
+    let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+    if (content.includes('STEAM_API_KEY=')) {
+      content = content.replace(/STEAM_API_KEY=.*/g, `STEAM_API_KEY=${key}`);
+    } else {
+      content += `\nSTEAM_API_KEY=${key}`;
+    }
+    fs.writeFileSync(envPath, content.trim() + '\n');
+    pushLog('info', 'Steam API Key сохранён');
+  } catch (e) {
+    pushLog('error', 'Ошибка сохранения Steam Key: ' + e.message);
+  }
+});
+
+ipcMain.handle('has-steam-key', () => {
+  const fs = require('fs');
+  // Проверяем оба места — .env проекта и userData
+  const paths = [
+    path.join(app.getPath('userData'), '.env'),
+    path.join(__dirname, '../.env'),
+  ];
+  for (const p of paths) {
+    try {
+      if (fs.existsSync(p)) {
+        const content = fs.readFileSync(p, 'utf8');
+        const match = content.match(/STEAM_API_KEY=(.+)/);
+        if (match && match[1].trim().length > 10) return true;
+      }
+    } catch { /* ignore */ }
+  }
+  return !!process.env.STEAM_API_KEY;
+});
+
 ipcMain.on('save-stratz-token', (_, token) => {
   const fs   = require('fs');
   const envPath = path.join(app.getPath('userData'), '.env');
@@ -528,6 +694,32 @@ app.whenReady().then(() => {
     const { width } = screen.getPrimaryDisplay().workAreaSize;
     mainWindow?.setPosition(width - 440, 20);
   });
+
+  // Проверяем наличие Steam API Key через 3 сек после запуска
+  setTimeout(() => {
+    const fsCheck = require('fs');
+    const checkPaths = [
+      path.join(app.getPath('userData'), '.env'),
+      path.join(__dirname, '../.env'),
+    ];
+    let hasKey = !!process.env.STEAM_API_KEY;
+    for (const ep of checkPaths) {
+      try {
+        if (fsCheck.existsSync(ep)) {
+          const m = fsCheck.readFileSync(ep, 'utf8').match(/STEAM_API_KEY=(.+)/);
+          if (m && m[1].trim().length > 10) { hasKey = true; break; }
+        }
+      } catch { /* ignore */ }
+    }
+    if (!hasKey) {
+      pushLog('warn', '⚠ Steam API Key не задан — открываем настройки...');
+      mainWindow?.webContents?.send('no-steam-key');
+      // Автооткрытие настроек через 2 сек после старта
+      setTimeout(() => createSettingsWindow(), 2000);
+    } else {
+      pushLog('info', '✓ Steam API Key найден');
+    }
+  }, 3000);
 });
 
 app.on('will-quit', () => {

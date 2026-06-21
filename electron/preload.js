@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateStatus:  (cb)    => ipcRenderer.on('update-status', (_, payload) => cb(payload)),
 
   // Настройки
+  saveSteamKey:    (key)   => ipcRenderer.send('save-steam-key', key),
+  hasSteamKey:     ()      => ipcRenderer.invoke('has-steam-key'),
   saveStratzToken: (token) => ipcRenderer.send('save-stratz-token', token),
   saveSettings:    (s)     => ipcRenderer.send('save-settings', s),
   onAppVersion:    (cb)    => ipcRenderer.on('app-version', (_, v) => cb(v)),

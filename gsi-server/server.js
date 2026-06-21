@@ -212,7 +212,54 @@ async function fetchMatch(matchId) {
   };
 }
 
-// ─── Live данные ──────────────────────────────────────────────────────────────
+// ─── Динамическое чтение ключей ───────────────────────────────────────────────
+// Читаем каждый раз из файла — чтобы ключ подхватывался без перезапуска сервера
+function getEnvKey(keyName) {
+  // Сначала из process.env (задан при старте)
+  if (process.env[keyName]) return process.env[keyName];
+
+  // Затем из userData .env (сохранён через настройки)
+  const userEnvPath = process.env.USER_ENV_PATH;
+  if (userEnvPath && fs.existsSync(userEnvPath)) {
+    try {
+      const content = fs.readFileSync(userEnvPath, 'utf8');
+      const match = content.match(new RegExp(`^${keyName}=(.+)$`, 'm'));
+      if (match?.[1]?.trim()) return match[1].trim();
+    } catch {}
+  }
+
+  // Фоллбэк — локальный .env (dev режим)
+  const localEnvPath = path.join(__dirname, '../.env');
+  if (fs.existsSync(localEnvPath)) {
+    try {
+      const content = fs.readFileSync(localEnvPath, 'utf8');
+      const match = content.match(new RegExp(`^${keyName}=(.+)$`, 'm'));
+      if (match?.[1]?.trim()) return match[1].trim();
+    } catch {}
+  }
+
+  return null;
+}
+
+// Endpoint для перезагрузки env после сохранения из настроек
+app.post('/reload-env', (req, res) => {
+  const userEnvPath = process.env.USER_ENV_PATH;
+  if (userEnvPath && fs.existsSync(userEnvPath)) {
+    require('dotenv').config({ path: userEnvPath, override: true });
+    console.log('[Server] ENV перезагружен из', userEnvPath);
+  }
+  const steamKey = getEnvKey('STEAM_API_KEY');
+  res.json({ ok: true, hasSteamKey: !!steamKey, hasAnthropicKey: !!getEnvKey('ANTHROPIC_API_KEY') });
+});
+
+app.get('/env-status', (req, res) => {
+  res.json({
+    hasSteamKey:    !!getEnvKey('STEAM_API_KEY'),
+    hasAnthropicKey:!!getEnvKey('ANTHROPIC_API_KEY'),
+  });
+});
+
+
 async function fetchLiveOpenDota(matchId) {
   const { data } = await axios.get(`${OPENDOTA}/live`, { timeout: 8000 });
   const m = data?.find(x => String(x.match_id) === String(matchId));
@@ -242,7 +289,7 @@ async function fetchLiveOpenDota(matchId) {
 }
 
 async function fetchLiveValve(matchId) {
-  const key = process.env.STEAM_API_KEY;
+  const key = getEnvKey('STEAM_API_KEY');
   if (!key) throw new Error('Нет STEAM_API_KEY');
   const { data } = await axios.get('https://api.steampowered.com/IDOTA2Match_570/GetMatchDetails/v1/', {
     params: { match_id: matchId, key }, timeout: 8000 });
