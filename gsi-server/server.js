@@ -382,19 +382,71 @@ app.get('/search', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/ai/analyze', async (req, res) => {
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Нет prompt' });
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return res.status(503).json({ error: 'ANTHROPIC_API_KEY не задан' });
-  try {
+// ─── AI провайдеры ────────────────────────────────────────────────────────────
+async function callAI(prompt, jsonMode) {
+  const provider = getEnvKey('AI_PROVIDER') || 'anthropic';
+  const systemPrompt = jsonMode
+    ? 'Ты эксперт Dota 2. Отвечай ТОЛЬКО валидным JSON без markdown и без ```json блоков.'
+    : 'Ты тренер Dota 2. 5 пунктов с эмодзи на русском. Коротко и конкретно.';
+  const maxTok = jsonMode ? 1200 : 600;
+
+  if (provider === 'anthropic') {
+    const key = getEnvKey('ANTHROPIC_API_KEY');
+    if (!key) throw new Error('ANTHROPIC_API_KEY не задан');
     const { data } = await axios.post('https://api.anthropic.com/v1/messages', {
-      model: 'claude-sonnet-4-20250514', max_tokens: 600,
-      system: 'Ты тренер Dota 2. 5 пунктов с эмодзи на русском. Коротко и конкретно.',
-      messages: [{ role: 'user', content: prompt }]
-    }, { headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' } });
-    res.json({ text: data.content?.find(c=>c.type==='text')?.text || '' });
-  } catch(e) { res.status(500).json({ error: e.response?.data?.error?.message || e.message }); }
+      model: 'claude-sonnet-4-20250514', max_tokens: maxTok,
+      system: systemPrompt, messages: [{ role: 'user', content: prompt }]
+    }, { headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' }, timeout: 30000 });
+    return data.content?.find(c => c.type === 'text')?.text || '';
+  }
+
+  if (provider === 'openai') {
+    const key = getEnvKey('OPENAI_API_KEY');
+    if (!key) throw new Error('OPENAI_API_KEY не задан');
+    const { data } = await axios.post('https://api.openai.com/v1/chat/completions', {
+      model: 'gpt-4o-mini', max_tokens: maxTok,
+      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }]
+    }, { headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' }, timeout: 30000 });
+    return data.choices?.[0]?.message?.content || '';
+  }
+
+  if (provider === 'gemini') {
+    const key = getEnvKey('GEMINI_API_KEY');
+    if (!key) throw new Error('GEMINI_API_KEY не задан');
+    const { data } = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+      {
+        contents: [{ parts: [{ text: systemPrompt + '\n\n' + prompt }] }],
+        generationConfig: { maxOutputTokens: maxTok },
+      },
+      { headers: { 'Content-Type': 'application/json' }, timeout: 30000 }
+    );
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  }
+
+  if (provider === 'deepseek') {
+    const key = getEnvKey('DEEPSEEK_API_KEY');
+    if (!key) throw new Error('DEEPSEEK_API_KEY не задан');
+    const { data } = await axios.post('https://api.deepseek.com/chat/completions', {
+      model: 'deepseek-chat', max_tokens: maxTok,
+      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }]
+    }, { headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' }, timeout: 30000 });
+    return data.choices?.[0]?.message?.content || '';
+  }
+
+  throw new Error(`Неизвестный провайдер: ${provider}`);
+}
+
+app.post('/ai/analyze', async (req, res) => {
+  const { prompt, json: jsonMode } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Нет prompt' });
+  try {
+    const text = await callAI(prompt, jsonMode);
+    res.json({ text, provider: getEnvKey('AI_PROVIDER') || 'anthropic' });
+  } catch(e) {
+    console.error('[AI]', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 server.listen(3001, () => {

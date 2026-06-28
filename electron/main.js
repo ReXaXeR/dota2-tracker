@@ -295,6 +295,40 @@ body{background:#0a0c12;color:#c8d0e0;font-family:'Inter',sans-serif;font-size:1
 
   <!-- ОБ ПРИЛОЖЕНИИ -->
   <div class="section">
+    <div class="section-title">AI — Сборки и анализ</div>
+    <div class="card">
+      <div style="margin-bottom:12px">
+        <div class="card-label">Провайдер AI</div>
+        <div class="card-sub" style="margin-top:3px">Используется для генерации сборок и анализа матча</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px" id="provider-grid">
+        ${['anthropic','openai','gemini','deepseek'].map(id => {
+          const labels = { anthropic:'Claude (Anthropic)', openai:'GPT-4o (OpenAI)', gemini:'Gemini (Google)', deepseek:'DeepSeek' };
+          const colors = { anthropic:'#e07a5f', openai:'#74aa9c', gemini:'#4285f4', deepseek:'#5e72e4' };
+          return `<button onclick="selectProvider('${id}')" id="prov-${id}" style="padding:8px;border-radius:6px;border:1px solid #1e2535;background:rgba(255,255,255,0.04);color:#7a8299;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;text-align:left">
+            <div style="width:8px;height:8px;border-radius:50%;background:${colors[id]};display:inline-block;margin-right:6px"></div>
+            ${labels[id]}
+          </button>`;
+        }).join('')}
+      </div>
+      <div id="ai-key-block">
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="input" type="password" id="ai-key" placeholder="Вставь API ключ..." style="flex:1">
+          <button class="btn btn-ghost" onclick="toggleAiKey()" title="Показать">👁</button>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+          <div id="ai-key-status" style="font-size:11px;color:#7a8299">—</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost" id="ai-get-key-btn" onclick="openAiKeyPage()">Получить ключ</button>
+            <button class="btn btn-primary" onclick="saveAiKey()">Сохранить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ОБ ПРИЛОЖЕНИИ -->
+  <div class="section">
     <div class="section-title">О приложении</div>
     <div class="card" style="font-size:11px;color:#4a5168;line-height:2">
       <div>Dota 2 Tracker by <a class="link" href="https://github.com/ReXaXeR/dota2-tracker" onclick="openExternal('https://github.com/ReXaXeR/dota2-tracker');return false">ReXaXeR</a></div>
@@ -373,6 +407,70 @@ function checkUpdates()   { api?.checkForUpdates(); }
 function downloadUpdate() { api?.downloadUpdate(); }
 function installUpdate()  { api?.installUpdate(); }
 function openExternal(url){ api?.openExternal(url); }
+
+// ─── AI Провайдеры ────────────────────────────────────────────────────────────
+const AI_PROVIDERS = {
+  anthropic: { label: 'Claude (Anthropic)', url: 'https://console.anthropic.com/settings/keys',  placeholder: 'sk-ant-...',  envKey: 'ANTHROPIC_API_KEY' },
+  openai:    { label: 'GPT-4o (OpenAI)',    url: 'https://platform.openai.com/api-keys',          placeholder: 'sk-...',       envKey: 'OPENAI_API_KEY' },
+  gemini:    { label: 'Gemini (Google)',     url: 'https://aistudio.google.com/app/apikey',        placeholder: 'AIza...',      envKey: 'GEMINI_API_KEY' },
+  deepseek:  { label: 'DeepSeek',           url: 'https://platform.deepseek.com/api_keys',        placeholder: 'sk-...',       envKey: 'DEEPSEEK_API_KEY' },
+};
+const PROVIDER_COLORS = { anthropic:'#e07a5f', openai:'#74aa9c', gemini:'#4285f4', deepseek:'#5e72e4' };
+let currentProvider = localStorage.getItem('ai_provider') || 'anthropic';
+
+function selectProvider(id) {
+  currentProvider = id;
+  localStorage.setItem('ai_provider', id);
+  api?.saveSettings({ ai_provider: id });
+
+  // UI update
+  Object.keys(AI_PROVIDERS).forEach(p => {
+    const btn = document.getElementById('prov-' + p);
+    if (!btn) return;
+    btn.style.borderColor = p === id ? PROVIDER_COLORS[p] : '#1e2535';
+    btn.style.background  = p === id ? PROVIDER_COLORS[p] + '22' : 'rgba(255,255,255,0.04)';
+    btn.style.color       = p === id ? PROVIDER_COLORS[p] : '#7a8299';
+  });
+
+  const pr = AI_PROVIDERS[id];
+  document.getElementById('ai-key').placeholder = pr.placeholder;
+  document.getElementById('ai-get-key-btn').textContent = 'Получить ключ → ' + pr.label.split(' ')[0];
+
+  // Проверяем есть ли уже ключ
+  api?.getAiKeyStatus(id).then(has => {
+    const st = document.getElementById('ai-key-status');
+    if (has) { st.textContent = '✓ Ключ установлен'; st.style.color = '#4ade80'; }
+    else      { st.textContent = '✗ Ключ не задан';  st.style.color = '#f87171'; }
+  }).catch(() => {});
+}
+
+function openAiKeyPage() {
+  const url = AI_PROVIDERS[currentProvider]?.url;
+  if (url) openExternal(url);
+}
+
+function toggleAiKey() {
+  const inp = document.getElementById('ai-key');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+async function saveAiKey() {
+  const key = document.getElementById('ai-key').value.trim();
+  const st  = document.getElementById('ai-key-status');
+  if (!key) { st.textContent = 'Введи ключ'; st.style.color = '#fb923c'; return; }
+  st.textContent = 'Сохраняем...'; st.style.color = '#6c8cff';
+  api?.saveAiKey(currentProvider, key);
+  setTimeout(() => {
+    st.textContent = '✓ Сохранено! Перезапусти приложение если ключ не работает.';
+    st.style.color = '#4ade80';
+    document.getElementById('ai-key').value = '';
+    document.getElementById('ai-key').type = 'password';
+  }, 500);
+}
+
+// Инициализация — выбираем текущий провайдер
+window.addEventListener('load', () => { selectProvider(currentProvider); });
+
 
 function updateOpacity(v) {
   document.getElementById('opacity-val').textContent = v + '%';
@@ -621,6 +719,59 @@ ipcMain.on('save-settings', (_, settings) => {
   }
 });
 
+ipcMain.on('save-ai-key', (_, provider, key) => {
+  const fs = require('fs');
+  const envPath = path.join(app.getPath('userData'), '.env');
+  const ENV_KEYS = {
+    anthropic: 'ANTHROPIC_API_KEY',
+    openai:    'OPENAI_API_KEY',
+    gemini:    'GEMINI_API_KEY',
+    deepseek:  'DEEPSEEK_API_KEY',
+  };
+  const envKey = ENV_KEYS[provider];
+  if (!envKey) return;
+  try {
+    let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+    if (content.includes(envKey + '=')) {
+      content = content.replace(new RegExp(envKey + '=.*'), `${envKey}=${key}`);
+    } else {
+      content += `\n${envKey}=${key}`;
+    }
+    // Сохраняем выбранный провайдер
+    if (content.includes('AI_PROVIDER=')) {
+      content = content.replace(/AI_PROVIDER=.*/, `AI_PROVIDER=${provider}`);
+    } else {
+      content += `\nAI_PROVIDER=${provider}`;
+    }
+    fs.writeFileSync(envPath, content.trim() + '\n');
+    pushLog('info', `[AI] ${provider} ключ сохранён`);
+    // Уведомляем сервер
+    const http = require('http');
+    const req = http.request({ hostname: 'localhost', port: 3001, path: '/reload-env', method: 'POST' });
+    req.on('error', () => {});
+    req.end();
+  } catch (e) {
+    pushLog('error', 'Ошибка сохранения AI ключа: ' + e.message);
+  }
+});
+
+ipcMain.handle('get-ai-key-status', (_, provider) => {
+  const fs = require('fs');
+  const ENV_KEYS = { anthropic:'ANTHROPIC_API_KEY', openai:'OPENAI_API_KEY', gemini:'GEMINI_API_KEY', deepseek:'DEEPSEEK_API_KEY' };
+  const envKey = ENV_KEYS[provider];
+  if (!envKey) return false;
+  const paths = [path.join(app.getPath('userData'), '.env'), path.join(__dirname, '../.env')];
+  for (const p of paths) {
+    try {
+      if (fs.existsSync(p)) {
+        const m = fs.readFileSync(p, 'utf8').match(new RegExp(`^${envKey}=(.+)$`, 'm'));
+        if (m?.[1]?.trim().length > 10) return true;
+      }
+    } catch {}
+  }
+  return !!(process.env[envKey]);
+});
+
 ipcMain.on('save-steam-key', (_, key) => {
   const fs = require('fs');
   const envPath = path.join(app.getPath('userData'), '.env');
@@ -632,7 +783,14 @@ ipcMain.on('save-steam-key', (_, key) => {
       content += `\nSTEAM_API_KEY=${key}`;
     }
     fs.writeFileSync(envPath, content.trim() + '\n');
-    pushLog('info', 'Steam API Key сохранён');
+    pushLog('info', 'Steam API Key сохранён в ' + envPath);
+
+    // Сразу уведомляем GSI сервер чтобы перечитал .env без перезапуска
+    const http = require('http');
+    const req = http.request({ hostname: 'localhost', port: 3001, path: '/reload-env', method: 'POST' });
+    req.on('response', r => pushLog('info', `[Server] ENV перезагружен, hasSteamKey: ${r.statusCode === 200}`));
+    req.on('error', () => pushLog('warn', 'GSI сервер не ответил на reload-env — перезапусти приложение'));
+    req.end();
   } catch (e) {
     pushLog('error', 'Ошибка сохранения Steam Key: ' + e.message);
   }

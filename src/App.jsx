@@ -504,6 +504,229 @@ function AnalysisBlock({ players }) {
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
+// ─── BuildTab — панель сборок ────────────────────────────────────────────────
+const ITEM_TIMINGS = {
+  // Стандартные тайминги предметов (минута когда нужен предмет)
+  'Power Treads':   8,  'Phase Boots': 8,   'Arcane Boots': 8,
+  'Black King Bar': 20, 'Blink Dagger': 15, 'Aghanim\'s Scepter': 25,
+  'Battle Fury':    18, 'Manta Style':  22, 'Butterfly': 30,
+  'Linken\'s Sphere': 22, 'Scythe of Vyse': 28, 'Refresher Orb': 32,
+};
+
+function BuildTab({ matchData, gsiState }) {
+  const [selectedHero, setSelectedHero] = useState('');
+  const [build, setBuild] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const players = matchData?.players || [];
+  const myTeam  = players.filter(p => p.team_number === 0);
+  const enemies = players.filter(p => p.team_number === 1);
+
+  const allHeroes = players.map(p => p.heroName).filter(Boolean);
+  const myHeroes  = myTeam.map(p => p.heroName).filter(Boolean);
+  const eneHeroes = enemies.map(p => p.heroName).filter(Boolean);
+
+  async function getBuild() {
+    if (!selectedHero) { setError('Выбери своего героя'); return; }
+    setLoading(true);
+    setError('');
+    setBuild(null);
+
+    const prompt = `Ты эксперт по Dota 2. Дай оптимальную сборку предметов.
+
+Мой герой: ${selectedHero}
+Моя команда: ${myHeroes.join(', ') || 'неизвестно'}
+Враги: ${eneHeroes.join(', ') || 'неизвестно'}
+
+Ответь ТОЛЬКО JSON без markdown, такой структуры:
+{
+  "role": "Carry/Mid/Support/Offlane",
+  "strategy": "2 предложения о стратегии против этого состава врагов",
+  "starting": ["предмет1", "предмет2", "предмет3", "предмет4"],
+  "early": ["предмет1", "предмет2"],
+  "core": ["предмет1", "предмет2", "предмет3"],
+  "situational": ["предмет1", "предмет2", "предмет3"],
+  "tips": ["совет1 против конкретного врага", "совет2", "совет3"]
+}`;
+
+    try {
+      const resp = await fetch('http://localhost:3001/ai/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, json: true }),
+      });
+      if (!resp.ok) throw new Error('AI недоступен');
+      const data = await resp.json();
+      const text = data.text || '';
+      const json = text.replace(/```json|```/g, '').trim();
+      setBuild(JSON.parse(json));
+    } catch (e) {
+      setError('Ошибка: ' + e.message + '. Нужен ANTHROPIC_API_KEY в настройках.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const ItemBadge = ({ name, phase }) => {
+    const phaseColors = { starting: '#60a5fa', early: '#4ade80', core: '#facc15', situational: '#a78bfa' };
+    const timing = ITEM_TIMINGS[name];
+    return (
+      <div style={{
+        padding: '5px 9px', borderRadius: 5,
+        background: 'rgba(255,255,255,0.05)',
+        border: `1px solid ${phaseColors[phase] || 'var(--border)'}22`,
+        display: 'flex', flexDirection: 'column', gap: 2,
+      }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>{name}</span>
+        {timing && <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>~{timing} мин</span>}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {/* Выбор героя */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6, letterSpacing: '0.05em' }}>
+          ТВОЙ ГЕРОЙ
+        </div>
+        {allHeroes.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {allHeroes.map((h, i) => {
+              const isEnemy = eneHeroes.includes(h);
+              const isSelected = selectedHero === h;
+              return (
+                <button key={i} onClick={() => setSelectedHero(h)} style={{
+                  padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 500,
+                  cursor: 'pointer', border: 'none',
+                  background: isSelected ? 'var(--accent)' : isEnemy ? 'rgba(248,113,113,0.12)' : 'rgba(255,255,255,0.06)',
+                  color: isSelected ? '#fff' : isEnemy ? 'var(--dire)' : 'var(--text-primary)',
+                  outline: isSelected ? '1px solid var(--accent)' : 'none',
+                }}>
+                  {h}
+                  {isEnemy && <span style={{ fontSize: 9, marginLeft: 4, opacity: 0.7 }}>врг</span>}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 0' }}>
+            Загрузи матч во вкладке МАТЧ чтобы увидеть героев
+          </div>
+        )}
+
+        {/* Ручной ввод если нет данных */}
+        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <input
+            style={{ ...{
+              flex: 1, height: 32, padding: '0 10px',
+              background: 'var(--bg-input)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)', color: 'var(--text-primary)', fontSize: 12, outline: 'none',
+            }}}
+            placeholder="Или введи имя героя вручную..."
+            value={selectedHero}
+            onChange={e => setSelectedHero(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && getBuild()}
+          />
+          <button
+            onClick={getBuild}
+            disabled={loading || !selectedHero}
+            style={{
+              height: 32, padding: '0 14px',
+              background: loading ? 'var(--bg-input)' : 'var(--accent-bg)',
+              border: '1px solid rgba(108,140,255,0.3)',
+              borderRadius: 'var(--radius-md)', color: 'var(--accent)',
+              fontSize: 11, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
+              fontFamily: 'Rajdhani, sans-serif', whiteSpace: 'nowrap',
+            }}
+          >
+            {loading ? '...' : '⚔ Сборка'}
+          </button>
+        </div>
+      </div>
+
+      {/* Состав команд */}
+      {(myHeroes.length > 0 || eneHeroes.length > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 9, color: 'var(--radiant)', fontWeight: 700, marginBottom: 4, letterSpacing: '0.05em' }}>▲ СОЮЗНИКИ</div>
+            {myHeroes.map((h, i) => <div key={i} style={{ fontSize: 10, color: 'var(--text-secondary)', padding: '1px 0' }}>{h}</div>)}
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: 'var(--dire)', fontWeight: 700, marginBottom: 4, letterSpacing: '0.05em' }}>▼ ВРАГИ</div>
+            {eneHeroes.map((h, i) => <div key={i} style={{ fontSize: 10, color: 'var(--text-secondary)', padding: '1px 0' }}>{h}</div>)}
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div style={{ padding: '8px 10px', borderRadius: 6, background: 'rgba(248,113,113,0.1)', color: '#f87171', fontSize: 11, marginBottom: 8 }}>
+          {error}
+        </div>
+      )}
+
+      {loading && (
+        <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 4, marginBottom: 8 }}>
+            {[0,1,2].map(i => (
+              <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: `pulse 1.2s ${i*0.2}s infinite` }} />
+            ))}
+          </div>
+          Анализируем состав и подбираем сборку...
+        </div>
+      )}
+
+      {/* Результат сборки */}
+      {build && (
+        <div>
+          {/* Стратегия */}
+          <div style={{ padding: '8px 10px', borderRadius: 6, background: 'rgba(108,140,255,0.08)', border: '1px solid rgba(108,140,255,0.2)', marginBottom: 10 }}>
+            <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, marginBottom: 4 }}>
+              {selectedHero} — {build.role}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{build.strategy}</div>
+          </div>
+
+          {/* Предметы */}
+          {[
+            { key: 'starting',    label: '🛒 СТАРТОВЫЕ',   color: '#60a5fa' },
+            { key: 'early',       label: '⚡ РАННЯЯ ИГРА', color: '#4ade80' },
+            { key: 'core',        label: '⚔️ ОСНОВНЫЕ',    color: '#facc15' },
+            { key: 'situational', label: '🎯 СИТУАТИВНЫЕ', color: '#a78bfa' },
+          ].map(({ key, label, color }) => build[key]?.length > 0 && (
+            <div key={key} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, color, fontWeight: 700, marginBottom: 5, letterSpacing: '0.05em' }}>{label}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                {build[key].map((item, i) => <ItemBadge key={i} name={item} phase={key} />)}
+              </div>
+            </div>
+          ))}
+
+          {/* Советы */}
+          {build.tips?.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, marginBottom: 5, letterSpacing: '0.05em' }}>💡 СОВЕТЫ</div>
+              {build.tips.map((tip, i) => (
+                <div key={i} style={{ fontSize: 11, color: 'var(--text-secondary)', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', lineHeight: 1.5 }}>
+                  • {tip}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button
+            onClick={getBuild}
+            style={{ marginTop: 10, width: '100%', height: 30, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer' }}
+          >
+            Пересчитать
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const tracker = useTracker();
   const [matchInput, setMatchInput] = useState('');
@@ -590,7 +813,7 @@ export default function App() {
 
       {/* Tabs */}
       <div style={s.tabs}>
-        {[['pick', '🎯 ПИК'], ['match', '📊 МАТЧ'], ['search', '🔍 ПОИСК']].map(([id, label]) => (
+        {[['pick', '🎯 ПИК'], ['match', '📊 МАТЧ'], ['build', '⚔️ СБОРКА'], ['search', '🔍 ПОИСК']].map(([id, label]) => (
           <button key={id} style={{ ...s.tab, ...(tracker.activeTab === id ? s.tabActive : {}) }}
             onClick={() => tracker.setActiveTab(id)}>{label}</button>
         ))}
@@ -772,6 +995,11 @@ export default function App() {
               </div>
             )}
           </>
+        )}
+
+        {/* ── СБОРКА ── */}
+        {tracker.activeTab === 'build' && (
+          <BuildTab matchData={tracker.matchData || (demoLoaded ? DEMO : null)} gsiState={tracker.gsiState} />
         )}
 
         {/* ── ПОИСК ── */}
