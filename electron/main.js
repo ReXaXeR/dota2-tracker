@@ -138,9 +138,21 @@ function createSettingsWindow() {
     }
   });
   settingsWindow.setMenuBarVisibility(false);
-  settingsWindow.loadURL(
-    'data:text/html;charset=utf-8,' + encodeURIComponent(buildSettingsHTML())
-  );
+
+  const fs = require('fs');
+  const tmpPath = path.join(app.getPath('temp'), 'dota2tracker-settings.html');
+  try {
+    fs.writeFileSync(tmpPath, buildSettingsHTML(), 'utf8');
+    settingsWindow.loadFile(tmpPath);
+  } catch (e) {
+    console.error('Не удалось записать settings.html: ' + e.message);
+    settingsWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(buildSettingsHTML()));
+  }
+
+  settingsWindow.webContents.on('console-message', (e, level, message, line) => {
+    if (level >= 2) console.error(`[Settings JS error] ${message} (line ${line})`);
+  });
+
   settingsWindow.webContents.on('did-finish-load', () => {
     settingsWindow.webContents.send('app-version', app.getVersion());
   });
@@ -416,11 +428,10 @@ const AI_PROVIDERS = {
   deepseek:  { label: 'DeepSeek',           url: 'https://platform.deepseek.com/api_keys',        placeholder: 'sk-...',       envKey: 'DEEPSEEK_API_KEY' },
 };
 const PROVIDER_COLORS = { anthropic:'#e07a5f', openai:'#74aa9c', gemini:'#4285f4', deepseek:'#5e72e4' };
-let currentProvider = localStorage.getItem('ai_provider') || 'anthropic';
+let currentProvider = 'anthropic'; // подтягивается через IPC при загрузке окна
 
 function selectProvider(id) {
   currentProvider = id;
-  localStorage.setItem('ai_provider', id);
   api?.saveSettings({ ai_provider: id });
 
   // UI update
@@ -469,7 +480,9 @@ async function saveAiKey() {
 }
 
 // Инициализация — выбираем текущий провайдер
-window.addEventListener('load', () => { selectProvider(currentProvider); });
+window.addEventListener('load', () => {
+  api?.getCurrentProvider?.().then(p => selectProvider(p || 'anthropic')).catch(() => selectProvider('anthropic'));
+});
 
 
 function updateOpacity(v) {
@@ -617,7 +630,20 @@ function createLogsWindow() {
     }
   });
   logsWindow.setMenuBarVisibility(false);
-  logsWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(buildLogsHTML()));
+
+  const fs = require('fs');
+  const tmpPath = path.join(app.getPath('temp'), 'dota2tracker-logs.html');
+  try {
+    fs.writeFileSync(tmpPath, buildLogsHTML(), 'utf8');
+    logsWindow.loadFile(tmpPath);
+  } catch (e) {
+    logsWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(buildLogsHTML()));
+  }
+
+  logsWindow.webContents.on('console-message', (e, level, message, line) => {
+    if (level >= 2) console.error(`[Logs window JS error] ${message} (line ${line})`);
+  });
+
   logsWindow.webContents.on('did-finish-load', () =>
     logsWindow.webContents.send('log-history', logBuffer));
   logsWindow.on('closed', () => { logsWindow = null; });
@@ -712,8 +738,29 @@ ipcMain.on('save-settings', (_, settings) => {
   const fs = require('fs');
   const settingsPath = path.join(app.getPath('userData'), 'settings.json');
   try {
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    let existing = {};
+    if (fs.existsSync(settingsPath)) {
+      try { existing = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch {}
+    }
+    fs.writeFileSync(settingsPath, JSON.stringify({ ...existing, ...settings }, null, 2));
     pushLog('info', 'Настройки сохранены');
+
+    if (settings.ai_provider) {
+      const envPath = path.join(app.getPath('userData'), '.env');
+      let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+      if (content.includes('AI_PROVIDER=')) {
+        content = content.replace(/AI_PROVIDER=.*/, `AI_PROVIDER=${settings.ai_provider}`);
+      } else {
+        content += `\nAI_PROVIDER=${settings.ai_provider}`;
+      }
+      fs.writeFileSync(envPath, content.trim() + '\n');
+      pushLog('info', `[AI] Провайдер переключён на: ${settings.ai_provider}`);
+
+      const http = require('http');
+      const req = http.request({ hostname: 'localhost', port: 3001, path: '/reload-env', method: 'POST' });
+      req.on('error', () => {});
+      req.end();
+    }
   } catch (e) {
     pushLog('error', 'Ошибка сохранения настроек: ' + e.message);
   }
@@ -770,6 +817,20 @@ ipcMain.handle('get-ai-key-status', (_, provider) => {
     } catch {}
   }
   return !!(process.env[envKey]);
+});
+
+ipcMain.handle('get-current-provider', () => {
+  const fs = require('fs');
+  const paths = [path.join(app.getPath('userData'), '.env'), path.join(__dirname, '../.env')];
+  for (const p of paths) {
+    try {
+      if (fs.existsSync(p)) {
+        const m = fs.readFileSync(p, 'utf8').match(/^AI_PROVIDER=(.+)$/m);
+        if (m?.[1]?.trim()) return m[1].trim();
+      }
+    } catch {}
+  }
+  return process.env.AI_PROVIDER || 'anthropic';
 });
 
 ipcMain.on('save-steam-key', (_, key) => {

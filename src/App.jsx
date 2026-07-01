@@ -775,6 +775,23 @@ export default function App() {
     }
   };
 
+  const handleMyProfile = async () => {
+    setSearchResults(null);
+    setSelectedProfile(null);
+    try {
+      const r = await fetch('http://localhost:3001/me');
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(err.error || 'Войди через Steam в Настройках (⚙️ → Твой Steam аккаунт)');
+        return;
+      }
+      const profile = await r.json();
+      setSelectedProfile(profile);
+    } catch (e) {
+      alert('Не удалось загрузить профиль: ' + e.message);
+    }
+  };
+
   const isElectron = typeof window.electronAPI !== 'undefined';
 
   return (
@@ -1017,6 +1034,18 @@ export default function App() {
                 {tracker.loading ? '...' : 'Искать'}
               </button>
             </div>
+
+            <button
+              onClick={handleMyProfile}
+              style={{
+                width: '100%', height: 30, marginBottom: 10,
+                background: 'rgba(102,192,244,0.08)', border: '1px solid rgba(102,192,244,0.25)',
+                borderRadius: 6, color: '#66c0f4', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}
+            >
+              👤 Мой профиль
+            </button>
 
             {searchResults && !selectedProfile && (
               <>

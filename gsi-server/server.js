@@ -214,11 +214,10 @@ async function fetchMatch(matchId) {
 
 // ─── Динамическое чтение ключей ───────────────────────────────────────────────
 // Читаем каждый раз из файла — чтобы ключ подхватывался без перезапуска сервера
+// ВАЖНО: userData .env (сохранённое через настройки) имеет приоритет над process.env,
+// потому что process.env был захвачен один раз при старте и не обновляется сам.
 function getEnvKey(keyName) {
-  // Сначала из process.env (задан при старте)
-  if (process.env[keyName]) return process.env[keyName];
-
-  // Затем из userData .env (сохранён через настройки)
+  // Сначала userData .env (актуальные настройки пользователя — самый свежий источник)
   const userEnvPath = process.env.USER_ENV_PATH;
   if (userEnvPath && fs.existsSync(userEnvPath)) {
     try {
@@ -228,7 +227,7 @@ function getEnvKey(keyName) {
     } catch {}
   }
 
-  // Фоллбэк — локальный .env (dev режим)
+  // Локальный .env в корне проекта (dev режим)
   const localEnvPath = path.join(__dirname, '../.env');
   if (fs.existsSync(localEnvPath)) {
     try {
@@ -237,6 +236,9 @@ function getEnvKey(keyName) {
       if (match?.[1]?.trim()) return match[1].trim();
     } catch {}
   }
+
+  // Фоллбэк — process.env (переменные окружения ОС, если заданы напрямую)
+  if (process.env[keyName]) return process.env[keyName];
 
   return null;
 }
@@ -385,6 +387,7 @@ app.get('/search', async (req, res) => {
 // ─── AI провайдеры ────────────────────────────────────────────────────────────
 async function callAI(prompt, jsonMode) {
   const provider = getEnvKey('AI_PROVIDER') || 'anthropic';
+  console.log(`[AI] Используем провайдер: ${provider}`);
   const systemPrompt = jsonMode
     ? 'Ты эксперт Dota 2. Отвечай ТОЛЬКО валидным JSON без markdown и без ```json блоков.'
     : 'Ты тренер Dota 2. 5 пунктов с эмодзи на русском. Коротко и конкретно.';
